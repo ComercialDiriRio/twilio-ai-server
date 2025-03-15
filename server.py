@@ -1,28 +1,54 @@
 from flask import Flask, request
-from twilio.twiml.voice_response import VoiceResponse
+from twilio.twiml.messaging_response import MessagingResponse
 import openai
+import os
+import requests
 
 app = Flask(__name__)
 
-# Substitua pela sua chave da OpenAI
-openai.api_key = "SUA_CHAVE_OPENAI"
+# Configurar a API da OpenAI
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-@app.route("/voice", methods=["POST"])
-def voice():
-    """Recebe a chamada do Twilio e responde com IA."""
-    user_input = request.form.get("SpeechResult", "")
+@app.route("/whatsapp", methods=["POST"])
+def whatsapp():
+    """Recebe mensagens do WhatsApp e responde com IA."""
 
-    response_text = gerar_resposta_ia(user_input)
+    # Obtém o tipo de mensagem (texto ou áudio)
+    user_message = request.form.get("Body", "")
+    media_url = request.form.get("MediaUrl0", None)
 
-    resposta = VoiceResponse()
-    resposta.say(response_text, voice="alice", language="pt-BR")
+    if media_url:  # Se for um áudio
+        user_message = transcrever_audio(media_url)
 
-    return str(resposta)
+    # Gera resposta da IA
+    response_text = gerar_resposta_ia(user_message)
+
+    # Envia a resposta de volta ao WhatsApp
+    response = MessagingResponse()
+    response.message(response_text)
+
+    return str(response)
+
+def transcrever_audio(audio_url):
+    """Baixa e transcreve o áudio usando Whisper."""
+    
+    headers = {"Authorization": f"Bearer {openai.api_key}"}
+    
+    # Baixar o áudio do link
+    audio_data = requests.get(audio_url).content
+    with open("audio.ogg", "wb") as f:
+        f.write(audio_data)
+
+    # Enviar para a API do Whisper
+    response = openai.Audio.transcribe("whisper-1", open("audio.ogg", "rb"))
+
+    return response["text"]
 
 def gerar_resposta_ia(texto_usuario):
-    """Gera uma resposta simulando um cliente."""
+    """Gera resposta simulando um cliente interessado em imóveis."""
     prompt = f"""
-    Você é um cliente interessado em imóveis. O corretor disse: '{texto_usuario}'. Como você responde?
+    Você é um cliente interessado em comprar um apartamento. 
+    O corretor disse: '{texto_usuario}'. Como você responde?
     """
 
     resposta = openai.ChatCompletion.create(
@@ -33,5 +59,4 @@ def gerar_resposta_ia(texto_usuario):
     return resposta["choices"][0]["message"]["content"]
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-    
+    app.run(host="0.0.0.0", port=10000)
