@@ -12,7 +12,7 @@ app = Flask(__name__)
 # Configurar a API da OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Perfis de clientes simulados - Agora todos começam com objeções
+# Perfis de clientes simulados - Todos começam com objeções
 perfis_clientes = {
     "pesquisando": "Você está apenas pesquisando e não tem certeza se quer comprar agora. Faça perguntas genéricas e mostre dúvidas sobre o financiamento.",
     "preocupado": "Você acha que os preços estão muito altos e tem medo de assumir um financiamento. Questione as taxas e condições de pagamento.",
@@ -23,6 +23,7 @@ perfis_clientes = {
 
 # Opções aleatórias para personalização do cliente
 nomes_clientes = ["João", "Maria", "Carlos", "Ana", "Ricardo", "Fernanda", "Paulo", "Juliana", "Gabriel", "Camila"]
+sobrenomes_clientes = ["Silva", "Oliveira", "Santos", "Ferreira", "Almeida", "Costa", "Pereira", "Martins", "Gomes", "Rodrigues"]
 lugares_moradia = ["Centro do Rio", "Copacabana", "Barra da Tijuca", "Campo Grande", "São Gonçalo", "Niterói", "Nova Iguaçu"]
 composicao_renda = ["Sozinho", "Com cônjuge", "Com pais", "Com irmãos", "Com amigo", "Com companheiro informal"]
 tipo_renda = ["Formal", "Informal", "Mista (parte formal, parte informal)"]
@@ -58,7 +59,13 @@ def whatsapp():
     """Responde mensagens no WhatsApp"""
     try:
         user_id = request.form.get("From", "")  # Identifica o corretor pelo número de telefone
-        user_message = request.form.get("Body", "")
+        user_message = request.form.get("Body", "").strip().lower()
+
+        # Se a mensagem for "cliente reiniciar", gera um novo cliente
+        if user_message == "cliente reiniciar":
+            cliente = gerar_novo_cliente()
+            conversas[user_id] = (datetime.date.today(), cliente)
+            return "Novo cliente gerado! Você pode começar a conversa."
 
         response_text = gerar_resposta_ia(user_message, user_id)
 
@@ -107,20 +114,26 @@ def gerar_resposta_ia(texto_usuario, user_id):
             cliente = gerar_novo_cliente()
             conversas[user_id] = (data_hoje, cliente)
 
+        # Avalia se o corretor perguntou o nome do cliente
+        if "seu nome" in texto_usuario or "como você se chama" in texto_usuario:
+            nome_cliente = f"{cliente['nome']} {cliente['sobrenome']}"
+        else:
+            nome_cliente = "Prefiro não dizer no momento."
+
         # Avaliar a resposta do corretor
         feedback = avaliar_resposta_corretor(texto_usuario)
 
         # Se o corretor estiver indo bem, o cliente aceita uma visita
         if feedback == "positivo":
-            return f"{cliente['nome']}: Você me convenceu! Podemos marcar uma visita ao stand em {cliente['stand']}?"
+            return f"{nome_cliente}: Você me convenceu! Podemos marcar uma visita ao stand em {cliente['stand']}?"
 
         # Se o corretor estiver indo mal, o cliente enrola
         elif feedback == "neutro":
-            return f"{cliente['nome']}: Ainda não tenho certeza... Preciso pensar mais um pouco."
+            return f"{nome_cliente}: Ainda não tenho certeza... Preciso pensar mais um pouco."
 
         # Se for muito mal, o cliente para de responder
         else:
-            return f"{cliente['nome']} parou de responder."
+            return f"{nome_cliente} parou de responder."
 
     except Exception as e:
         return f"Erro ao gerar resposta da IA: {str(e)}"
@@ -145,11 +158,18 @@ def avaliar_resposta_corretor(resposta):
 
 def gerar_novo_cliente():
     """Gera um novo cliente aleatório"""
+    idade = random.randint(18, 50)
+    ano_nascimento = datetime.date.today().year - idade
+    data_nascimento = f"{random.randint(1, 28)}/{random.randint(1, 12)}/{ano_nascimento}"
+    
     empreendimento = random.choice(empreendimentos_rj)
 
     return {
         "perfil": random.choice(list(perfis_clientes.keys())),
         "nome": random.choice(nomes_clientes),
+        "sobrenome": random.choice(sobrenomes_clientes),
+        "idade": idade,
+        "data_nascimento": data_nascimento,
         "local": random.choice(lugares_moradia),
         "renda": random.choice(tipo_renda),
         "composicao_renda": random.choice(composicao_renda),
