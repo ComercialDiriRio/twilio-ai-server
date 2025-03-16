@@ -12,21 +12,41 @@ app = Flask(__name__)
 # Configurar a API da OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Perfis de clientes simulados
+# Perfis de clientes simulados - Agora todos começam com objeções
 perfis_clientes = {
-    "indeferido": "Você é um cliente interessado, mas muito indeciso. Pergunte sobre financiamento, localização e vantagens, mas sem demonstrar certeza de compra.",
-    "apressado": "Você já pesquisou e quer fechar um negócio rapidamente. Seja objetivo e peça logo detalhes sobre valores e formas de pagamento.",
-    "negociador": "Você quer comprar, mas deseja obter o melhor preço. Pergunte sobre descontos e negociações disponíveis.",
-    "desinteressado": "Você não tem interesse no apartamento, mas foi abordado pelo corretor e responde com frases curtas.",
-    "sem_renda": "Você quer comprar um apartamento, mas sua renda não é suficiente para o financiamento e deseja saber opções alternativas.",
-    "confuso": "Você mistura informações de vários empreendimentos e faz perguntas que não fazem sentido.",
-    "detalhista": "Você quer saber todas as especificações técnicas do apartamento, como materiais, acabamento e medidas exatas.",
-    "desconfiado": "Você acha que pode estar sendo enganado e faz perguntas para verificar taxas ocultas ou possíveis problemas no imóvel.",
-    "enrolado": "Você gosta do apartamento, mas nunca toma uma decisão, sempre diz que precisa pensar mais.",
-    "entusiasmado": "Você está muito animado e já se imagina morando no apartamento. Pergunta sobre vizinhança, escolas e transporte."
+    "pesquisando": "Você está apenas pesquisando e não tem certeza se quer comprar agora. Faça perguntas genéricas e mostre dúvidas sobre o financiamento.",
+    "preocupado": "Você acha que os preços estão muito altos e tem medo de assumir um financiamento. Questione as taxas e condições de pagamento.",
+    "sem_tempo": "Você diz que está sem tempo para pensar nisso agora e evita se comprometer com uma visita ao stand.",
+    "desconfiado": "Você tem medo de golpes ou promessas exageradas e questiona se o empreendimento é realmente uma boa opção.",
+    "protelador": "Você sempre diz que vai pensar melhor e deixa a decisão para depois, sem marcar visitas.",
 }
 
-# Dicionário para armazenar o perfil e a última data de interação do corretor
+# Opções aleatórias para personalização do cliente
+nomes_clientes = ["João", "Maria", "Carlos", "Ana", "Ricardo", "Fernanda", "Paulo", "Juliana", "Gabriel", "Camila"]
+lugares_moradia = ["Centro do Rio", "Copacabana", "Barra da Tijuca", "Campo Grande", "São Gonçalo", "Niterói", "Nova Iguaçu"]
+composicao_renda = ["Sozinho", "Com cônjuge", "Com pais", "Com irmãos", "Com amigo", "Com companheiro informal"]
+tipo_renda = ["Formal", "Informal", "Mista (parte formal, parte informal)"]
+
+# Lista de empreendimentos da Direcional no Rio de Janeiro
+empreendimentos_rj = [
+    {
+        "nome": "Direcional Vert Alcântara",
+        "local": "São Gonçalo",
+        "stand": "Estrada dos Bandeirantes, 106 – Taquara",
+    },
+    {
+        "nome": "Olinda Ellis",
+        "local": "Campo Grande",
+        "stand": "Rua Olinda Ellis, 810 – Campo Grande",
+    },
+    {
+        "nome": "Reserva do Sol",
+        "local": "Jacarepaguá",
+        "stand": "Av. Embaixador Abelardo Bueno, 3300 – Jacarepaguá",
+    }
+]
+
+# Dicionário para armazenar os dados do cliente e a última data de interação do corretor
 conversas = {}
 
 @app.route("/")
@@ -35,14 +55,10 @@ def home():
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
-    """Responde mensagens e áudios no WhatsApp"""
+    """Responde mensagens no WhatsApp"""
     try:
         user_id = request.form.get("From", "")  # Identifica o corretor pelo número de telefone
         user_message = request.form.get("Body", "")
-        media_url = request.form.get("MediaUrl0", None)
-
-        if media_url:  # Se for um áudio, transcreve
-            user_message = transcrever_audio(media_url)
 
         response_text = gerar_resposta_ia(user_message, user_id)
 
@@ -75,60 +91,71 @@ def voice():
         return f"Erro no processamento da chamada: {str(e)}"
 
 def gerar_resposta_ia(texto_usuario, user_id):
-    """Gera resposta personalizada baseada no perfil do cliente"""
+    """Gera resposta baseada no comportamento do corretor"""
     try:
         data_hoje = datetime.date.today()
 
-        # Se o corretor já tem um perfil, verifica se precisa ser alterado
+        # Se o corretor já tem um cliente definido, verifica se precisa mudar
         if user_id in conversas:
-            ultima_data, ultimo_perfil = conversas[user_id]
+            ultima_data, cliente_info = conversas[user_id]
             if ultima_data == data_hoje:
-                perfil = ultimo_perfil  # Mantém o mesmo perfil durante o dia
+                cliente = cliente_info  # Mantém o mesmo cliente durante o dia
             else:
-                # Escolhe um perfil diferente do anterior
-                perfis_disponiveis = [p for p in perfis_clientes.keys() if p != ultimo_perfil]
-                perfil = random.choice(perfis_disponiveis)
-                conversas[user_id] = (data_hoje, perfil)
+                cliente = gerar_novo_cliente()
+                conversas[user_id] = (data_hoje, cliente)
         else:
-            # Se for o primeiro contato, escolhe um perfil aleatório
-            perfil = random.choice(list(perfis_clientes.keys()))
-            conversas[user_id] = (data_hoje, perfil)
+            cliente = gerar_novo_cliente()
+            conversas[user_id] = (data_hoje, cliente)
 
-        prompt = f"""
-        {perfis_clientes[perfil]}
-        O corretor disse: '{texto_usuario}'. Como você responde?
-        """
+        # Avaliar a resposta do corretor
+        feedback = avaliar_resposta_corretor(texto_usuario)
 
-        resposta = openai.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[{"role": "system", "content": prompt}]
-        )
+        # Se o corretor estiver indo bem, o cliente aceita uma visita
+        if feedback == "positivo":
+            return f"{cliente['nome']}: Você me convenceu! Podemos marcar uma visita ao stand em {cliente['stand']}?"
 
-        return resposta.choices[0].message.content
+        # Se o corretor estiver indo mal, o cliente enrola
+        elif feedback == "neutro":
+            return f"{cliente['nome']}: Ainda não tenho certeza... Preciso pensar mais um pouco."
+
+        # Se for muito mal, o cliente para de responder
+        else:
+            return f"{cliente['nome']} parou de responder."
 
     except Exception as e:
         return f"Erro ao gerar resposta da IA: {str(e)}"
 
-def transcrever_audio(audio_url):
-    """Baixa e transcreve o áudio usando Whisper"""
+def avaliar_resposta_corretor(resposta):
+    """Analisa a resposta do corretor e determina se foi boa, neutra ou ruim"""
     try:
-        headers = {"Authorization": f"Bearer {openai.api_key}"}
-    
-        # Baixa o áudio da URL enviada pelo Twilio
-        audio_data = requests.get(audio_url).content
-        with open("audio.ogg", "wb") as f:
-            f.write(audio_data)
+        prompt = f"""
+        O corretor respondeu: '{resposta}'
+        Ele conseguiu vencer a objeção do cliente? Responda apenas com 'positivo', 'neutro' ou 'negativo'.
+        """
 
-        # Envia o áudio para a API do Whisper para transcrição
-        response = openai.audio.transcriptions.create(
-            model="whisper-1",
-            file=open("audio.ogg", "rb")
+        resposta_ai = openai.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[{"role": "system", "content": prompt}]
         )
 
-        return response.text
+        return resposta_ai.choices[0].message.content.lower().strip()
 
     except Exception as e:
-        return f"Erro ao transcrever áudio: {str(e)}"
+        return "neutro"
+
+def gerar_novo_cliente():
+    """Gera um novo cliente aleatório"""
+    empreendimento = random.choice(empreendimentos_rj)
+
+    return {
+        "perfil": random.choice(list(perfis_clientes.keys())),
+        "nome": random.choice(nomes_clientes),
+        "local": random.choice(lugares_moradia),
+        "renda": random.choice(tipo_renda),
+        "composicao_renda": random.choice(composicao_renda),
+        "stand": empreendimento["stand"],
+        "empreendimento": empreendimento["nome"],
+    }
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
