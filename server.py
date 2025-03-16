@@ -18,74 +18,80 @@ def home():
 @app.route("/voice", methods=["POST"])
 def voice():
     """Responde chamadas de voz do Twilio"""
-    
-    # Captura o que foi dito pelo corretor
-    user_input = request.form.get("SpeechResult", "")
+    try:
+        user_input = request.form.get("SpeechResult", "")
 
-    if not user_input:
-        user_input = "Olá, estou interessado em um apartamento."
+        if not user_input:
+            user_input = "Olá, estou interessado em um apartamento."
 
-    # Gera resposta da IA
-    response_text = gerar_resposta_ia(user_input)
+        response_text = gerar_resposta_ia(user_input)
 
-    # Responde com áudio para o Twilio
-    resposta = VoiceResponse()
-    resposta.say(response_text, voice="alice", language="pt-BR")
+        resposta = VoiceResponse()
+        resposta.say(response_text, voice="alice", language="pt-BR")
 
-    return str(resposta)
+        return str(resposta)
+
+    except Exception as e:
+        return f"Erro no processamento da chamada: {str(e)}"
 
 # 💬 Rota para responder mensagens no WhatsApp
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
     """Responde mensagens e áudios no WhatsApp"""
+    try:
+        user_message = request.form.get("Body", "")
+        media_url = request.form.get("MediaUrl0", None)
 
-    # Captura mensagem ou áudio enviado pelo corretor
-    user_message = request.form.get("Body", "")
-    media_url = request.form.get("MediaUrl0", None)
+        if media_url:  # Se for um áudio, tenta transcrever
+            user_message = transcrever_audio(media_url)
 
-    if media_url:  # Se for um áudio, transcreve
-        user_message = transcrever_audio(media_url)
+        response_text = gerar_resposta_ia(user_message)
 
-    # Gera resposta da IA
-    response_text = gerar_resposta_ia(user_message)
+        response = MessagingResponse()
+        response.message(response_text)
 
-    # Envia a resposta de volta ao WhatsApp
-    response = MessagingResponse()
-    response.message(response_text)
+        return str(response)
 
-    return str(response)
+    except Exception as e:
+        return f"Erro ao processar mensagem do WhatsApp: {str(e)}"
 
 # 🎙️ Função para transcrever áudios do WhatsApp
 def transcrever_audio(audio_url):
     """Baixa e transcreve o áudio usando Whisper"""
+    try:
+        headers = {"Authorization": f"Bearer {openai.api_key}"}
     
-    headers = {"Authorization": f"Bearer {openai.api_key}"}
-    
-    # Baixa o áudio da URL enviada pelo Twilio
-    audio_data = requests.get(audio_url).content
-    with open("audio.ogg", "wb") as f:
-        f.write(audio_data)
+        # Baixa o áudio da URL enviada pelo Twilio
+        audio_data = requests.get(audio_url).content
+        with open("audio.ogg", "wb") as f:
+            f.write(audio_data)
 
-    # Envia o áudio para a API do Whisper para transcrição
-    response = openai.Audio.transcribe("whisper-1", open("audio.ogg", "rb"))
+        # Envia o áudio para a API do Whisper para transcrição
+        response = openai.Audio.transcribe("whisper-1", open("audio.ogg", "rb"))
 
-    return response["text"]
+        return response["text"]
+
+    except Exception as e:
+        return f"Erro ao transcrever áudio: {str(e)}"
 
 # 🧠 Função que gera resposta da IA simulando um cliente
 def gerar_resposta_ia(texto_usuario):
     """Gera resposta para o corretor como se fosse um cliente"""
-    
-    prompt = f"""
-    Você é um cliente interessado em comprar um apartamento. 
-    O corretor disse: '{texto_usuario}'. Como você responde?
-    """
+    try:
+        prompt = f"""
+        Você é um cliente interessado em comprar um apartamento. 
+        O corretor disse: '{texto_usuario}'. Como você responde?
+        """
 
-    resposta = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "system", "content": prompt}]
-    )
+        resposta = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": prompt}]
+        )
 
-    return resposta["choices"][0]["message"]["content"]
+        return resposta["choices"][0]["message"]["content"]
+
+    except Exception as e:
+        return f"Erro ao gerar resposta da IA: {str(e)}"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
