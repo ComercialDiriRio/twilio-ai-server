@@ -12,10 +12,10 @@ app = Flask(__name__)
 # Configurar a API da OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Perfis de clientes simulados - Todos começam com objeções
+# Perfis de clientes simulados
 perfis_clientes = {
     "pesquisando": "Você está apenas pesquisando e não tem certeza se quer comprar agora. Faça perguntas genéricas e mostre dúvidas sobre o financiamento.",
-    "preocupado": "Você acha que os preços estão muito altos e tem medo de assumir um financiamento. Questione as taxas e condições de pagamento.",
+    "preocupado": "Você acha que os preços estão altos e tem medo de assumir um financiamento. Questione as taxas e condições de pagamento.",
     "sem_tempo": "Você diz que está sem tempo para pensar nisso agora e evita se comprometer com uma visita ao stand.",
     "desconfiado": "Você tem medo de golpes ou promessas exageradas e questiona se o empreendimento é realmente uma boa opção.",
     "protelador": "Você sempre diz que vai pensar melhor e deixa a decisão para depois, sem marcar visitas.",
@@ -25,8 +25,6 @@ perfis_clientes = {
 nomes_clientes = ["João", "Maria", "Carlos", "Ana", "Ricardo", "Fernanda", "Paulo", "Juliana", "Gabriel", "Camila"]
 sobrenomes_clientes = ["Silva", "Oliveira", "Santos", "Ferreira", "Almeida", "Costa", "Pereira", "Martins", "Gomes", "Rodrigues"]
 lugares_moradia = ["Centro do Rio", "Copacabana", "Barra da Tijuca", "Campo Grande", "São Gonçalo", "Niterói", "Nova Iguaçu"]
-composicao_renda = ["Sozinho", "Com cônjuge", "Com pais", "Com irmãos", "Com amigo", "Com companheiro informal"]
-tipo_renda = ["Formal", "Informal", "Mista (parte formal, parte informal)"]
 
 # Lista de empreendimentos da Direcional no Rio de Janeiro
 empreendimentos_rj = [
@@ -61,11 +59,11 @@ def whatsapp():
         user_id = request.form.get("From", "")  # Identifica o corretor pelo número de telefone
         user_message = request.form.get("Body", "").strip().lower()
 
-        # Se a mensagem for "cliente reiniciar", gera um novo cliente
+        # Se a mensagem for "cliente reiniciar", gera um novo cliente e envia a confirmação
         if user_message == "cliente reiniciar":
             cliente = gerar_novo_cliente()
             conversas[user_id] = (datetime.date.today(), cliente)
-            return "Novo cliente gerado! Você pode começar a conversa."
+            return f"Novo cliente gerado! Meu nome é {cliente['nome']} {cliente['sobrenome']}. Como posso te ajudar hoje?"
 
         response_text = gerar_resposta_ia(user_message, user_id)
 
@@ -76,26 +74,6 @@ def whatsapp():
 
     except Exception as e:
         return f"Erro ao processar mensagem do WhatsApp: {str(e)}"
-
-@app.route("/voice", methods=["POST"])
-def voice():
-    """Responde chamadas de voz do Twilio"""
-    try:
-        user_id = request.form.get("Caller", "")  # Identifica o corretor pelo número de telefone
-        user_input = request.form.get("SpeechResult", "")
-
-        if not user_input:
-            user_input = "Olá, estou interessado em um apartamento."
-
-        response_text = gerar_resposta_ia(user_input, user_id)
-
-        resposta = VoiceResponse()
-        resposta.say(response_text, voice="alice", language="pt-BR")
-
-        return str(resposta)
-
-    except Exception as e:
-        return f"Erro no processamento da chamada: {str(e)}"
 
 def gerar_resposta_ia(texto_usuario, user_id):
     """Gera resposta baseada no comportamento do corretor"""
@@ -114,36 +92,22 @@ def gerar_resposta_ia(texto_usuario, user_id):
             cliente = gerar_novo_cliente()
             conversas[user_id] = (data_hoje, cliente)
 
-        # Avalia se o corretor perguntou o nome do cliente
-        if "seu nome" in texto_usuario or "como você se chama" in texto_usuario:
-            nome_cliente = f"{cliente['nome']} {cliente['sobrenome']}"
-        else:
-            nome_cliente = "Prefiro não dizer no momento."
-
         # Avaliar a resposta do corretor
-        feedback = avaliar_resposta_corretor(texto_usuario)
+        feedback = avaliar_resposta_corretor(texto_usuario, cliente)
 
-        # Se o corretor estiver indo bem, o cliente aceita uma visita
-        if feedback == "positivo":
-            return f"{nome_cliente}: Você me convenceu! Podemos marcar uma visita ao stand em {cliente['stand']}?"
-
-        # Se o corretor estiver indo mal, o cliente enrola
-        elif feedback == "neutro":
-            return f"{nome_cliente}: Ainda não tenho certeza... Preciso pensar mais um pouco."
-
-        # Se for muito mal, o cliente para de responder
-        else:
-            return f"{nome_cliente} parou de responder."
+        return feedback
 
     except Exception as e:
         return f"Erro ao gerar resposta da IA: {str(e)}"
 
-def avaliar_resposta_corretor(resposta):
-    """Analisa a resposta do corretor e determina se foi boa, neutra ou ruim"""
+def avaliar_resposta_corretor(resposta, cliente):
+    """Analisa a resposta do corretor e ajusta o nível de engajamento do cliente"""
     try:
         prompt = f"""
         O corretor respondeu: '{resposta}'
-        Ele conseguiu vencer a objeção do cliente? Responda apenas com 'positivo', 'neutro' ou 'negativo'.
+        O cliente é {cliente['perfil']} e está tentando vencer objeções.  
+        O cliente deve reagir de forma realista, interagindo mais antes de decidir marcar uma visita ou desistir.
+        Responda de maneira natural para criar um diálogo contínuo.
         """
 
         resposta_ai = openai.chat.completions.create(
@@ -151,10 +115,10 @@ def avaliar_resposta_corretor(resposta):
             messages=[{"role": "system", "content": prompt}]
         )
 
-        return resposta_ai.choices[0].message.content.lower().strip()
+        return resposta_ai.choices[0].message.content.strip()
 
     except Exception as e:
-        return "neutro"
+        return "Desculpe, não entendi bem. Você pode me explicar melhor?"
 
 def gerar_novo_cliente():
     """Gera um novo cliente aleatório"""
@@ -171,8 +135,6 @@ def gerar_novo_cliente():
         "idade": idade,
         "data_nascimento": data_nascimento,
         "local": random.choice(lugares_moradia),
-        "renda": random.choice(tipo_renda),
-        "composicao_renda": random.choice(composicao_renda),
         "stand": empreendimento["stand"],
         "empreendimento": empreendimento["nome"],
     }
