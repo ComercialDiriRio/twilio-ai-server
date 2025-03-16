@@ -7,7 +7,7 @@ import requests
 
 app = Flask(__name__)
 
-# Configurar a API da OpenAI
+# Configurar a API da OpenAI (Certifique-se de que a variável está no Render)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route("/")
@@ -67,9 +67,12 @@ def transcrever_audio(audio_url):
             f.write(audio_data)
 
         # Envia o áudio para a API do Whisper para transcrição
-        response = openai.Audio.transcribe("whisper-1", open("audio.ogg", "rb"))
+        response = openai.audio.transcriptions.create(
+            model="whisper-1",
+            file=open("audio.ogg", "rb")
+        )
 
-        return response["text"]
+        return response.text
 
     except Exception as e:
         return f"Erro ao transcrever áudio: {str(e)}"
@@ -83,12 +86,12 @@ def gerar_resposta_ia(texto_usuario):
         O corretor disse: '{texto_usuario}'. Como você responde?
         """
 
-        resposta = openai.ChatCompletion.create(
+        resposta = openai.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "system", "content": prompt}]
         )
 
-        return resposta["choices"][0]["message"]["content"]
+        return resposta.choices[0].message.content
 
     except Exception as e:
         return f"Erro ao gerar resposta da IA: {str(e)}"
