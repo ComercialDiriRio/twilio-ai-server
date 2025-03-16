@@ -87,7 +87,7 @@ def gerar_resposta_ia(texto_usuario):
         """
 
         resposta = openai.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4-turbo",  # Correção do nome do modelo
             messages=[{"role": "system", "content": prompt}]
         )
 
